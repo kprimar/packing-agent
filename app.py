@@ -16,6 +16,7 @@ load_dotenv()
 
 from agent.weather import get_weather, format_weather_context
 from agent import packer
+from agent.config import get_default_location, set_default_location, clear_default_location
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -66,6 +67,32 @@ def _parse_date(raw: str):
     raise ValueError(raw)
 
 
+def _parse_outfit_date_range(raw: str):
+    """Return (start_date, end_date) for natural outfit-date inputs like 'today', 'this week'."""
+    import re
+    from datetime import date, timedelta
+
+    text = raw.strip().lower()
+    today = date.today()
+
+    if text in ("today", ""):
+        return today, today
+    if text == "tomorrow":
+        return today + timedelta(1), today + timedelta(1)
+    if text in ("this week", "next 7 days", "the week"):
+        return today, today + timedelta(6)
+    if text in ("next 3 days", "3 days"):
+        return today, today + timedelta(2)
+
+    m = re.match(r"next (\d+) days?", text)
+    if m:
+        n = int(m.group(1))
+        return today, today + timedelta(n - 1)
+
+    d = _parse_date(raw)
+    return d, d
+
+
 class PackingAgentApp(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -73,6 +100,7 @@ class PackingAgentApp(ctk.CTk):
         self.geometry("680x740")
         self.minsize(500, 520)
 
+        self._mode = "packing"
         self._state = "AWAITING_DESTINATION"
         self._destination = None
         self._start_date = None
@@ -80,7 +108,19 @@ class PackingAgentApp(ctk.CTk):
         self._messages = []
 
         self._build_ui()
-        self.after(150, lambda: self._agent_say("Hi! Where are you traveling to?"))
+
+        _default = get_default_location()
+        if _default:
+            self._destination = _default
+            self._mode = "outfit"
+            self._state = "AWAITING_OUTFIT_DATE"
+            self.after(150, lambda: self._agent_say(
+                f"Hi! Using {_default} as your default location. "
+                "What day would you like outfit recommendations for? "
+                "(e.g. today, tomorrow, this week, or a date like June 10)"
+            ))
+        else:
+            self.after(150, lambda: self._agent_say("Hi! Where are you traveling to?"))
 
     # ── Layout ────────────────────────────────────────────────────────────────
 
@@ -88,10 +128,23 @@ class PackingAgentApp(ctk.CTk):
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
 
+        header = ctk.CTkFrame(self, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="ew", padx=16, pady=(12, 0))
+        header.grid_columnconfigure(0, weight=1)
+
         ctk.CTkLabel(
-            self, text="Packing Agent",
+            header, text="Packing Agent",
             font=ctk.CTkFont(size=22, weight="bold"),
-        ).grid(row=0, column=0, pady=(18, 6))
+        ).grid(row=0, column=0, pady=6)
+
+        ctk.CTkButton(
+            header, text="⚙",
+            width=36, height=36,
+            font=ctk.CTkFont(size=18),
+            fg_color="transparent",
+            hover_color=("gray80", "gray25"),
+            command=self._open_settings,
+        ).grid(row=0, column=1, sticky="e")
 
         self._chat = ctk.CTkScrollableFrame(self, fg_color=("gray88", "gray13"))
         self._chat.grid(row=1, column=0, padx=16, pady=8, sticky="nsew")
@@ -163,6 +216,61 @@ class PackingAgentApp(ctk.CTk):
             self._entry.configure(state="normal")
             self._entry.focus()
 
+    # ── Settings dialog ───────────────────────────────────────────────────────
+
+    def _open_settings(self):
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Settings")
+        dialog.geometry("380x200")
+        dialog.resizable(False, False)
+        dialog.grab_set()
+
+        ctk.CTkLabel(
+            dialog, text="Default location",
+            font=ctk.CTkFont(size=15, weight="bold"),
+        ).pack(pady=(24, 8))
+
+        entry = ctk.CTkEntry(
+            dialog, width=280,
+            placeholder_text="e.g. London, New York, Tokyo",
+            font=ctk.CTkFont(size=13),
+        )
+        current = get_default_location()
+        if current:
+            entry.insert(0, current)
+        entry.pack()
+
+        status = ctk.CTkLabel(dialog, text="", font=ctk.CTkFont(size=12), text_color=("red", "#ff6b6b"))
+        status.pack(pady=(4, 0))
+
+        def _save():
+            loc = entry.get().strip()
+            if not loc:
+                dialog.destroy()
+                return
+            status.configure(text="Checking location…")
+            dialog.update()
+            try:
+                from agent.weather import geocode
+                _, _, resolved = geocode(loc)
+                set_default_location(loc)
+                dialog.destroy()
+            except Exception:
+                status.configure(text=f"Location not found. Try a city name like 'Vancouver' or 'Tokyo'.")
+
+        def _clear():
+            clear_default_location()
+            dialog.destroy()
+
+        btn_row = ctk.CTkFrame(dialog, fg_color="transparent")
+        btn_row.pack(pady=18)
+        ctk.CTkButton(btn_row, text="Save", width=110, command=_save).grid(row=0, column=0, padx=8)
+        ctk.CTkButton(
+            btn_row, text="Clear default",
+            width=110, fg_color=("gray60", "gray35"), hover_color=("gray50", "gray25"),
+            command=_clear,
+        ).grid(row=0, column=1, padx=8)
+
     # ── Input routing ─────────────────────────────────────────────────────────
 
     def _on_send(self):
@@ -174,7 +282,20 @@ class PackingAgentApp(ctk.CTk):
         self._route(text)
 
     def _route(self, text: str):
-        if self._state == "AWAITING_DESTINATION":
+        if self._state == "AWAITING_OUTFIT_DATE":
+            try:
+                start, end = _parse_outfit_date_range(text)
+                self._start_date = start
+                self._end_date = end
+                self._state = "FETCHING"
+                self._fetch_weather()
+            except ValueError:
+                self._agent_say(
+                    "I couldn't read that. Try 'today', 'tomorrow', 'this week', "
+                    "or a date like June 10."
+                )
+
+        elif self._state == "AWAITING_DESTINATION":
             self._destination = text
             self._state = "AWAITING_START_DATE"
             self._agent_say("What's your departure date? (e.g. 2026-08-01)")
@@ -219,34 +340,40 @@ class PackingAgentApp(ctk.CTk):
             )
             ctx = format_weather_context(w)
             historical = w.get("is_historical", False)
-            self.after(0, lambda: self._weather_ready(ctx, historical))
+            self.after(0, lambda c=ctx, h=historical: self._weather_ready(c, h))
         except Exception as exc:
-            self.after(0, lambda: self._error(f"Could not fetch weather: {exc}"))
+            self.after(0, lambda e=exc: self._error(f"Could not fetch weather: {e}"))
 
     def _weather_ready(self, ctx: str, historical: bool):
         if historical:
-            self._agent_say(
-                "Your travel dates are beyond the 16-day forecast window, "
-                "so I'm using historical data from the same period last year."
-            )
+            if self._mode == "outfit":
+                self._agent_say(
+                    "The date is beyond the 16-day forecast window, "
+                    "so I'm using historical data from the same period last year."
+                )
+            else:
+                self._agent_say(
+                    "Your travel dates are beyond the 16-day forecast window, "
+                    "so I'm using historical data from the same period last year."
+                )
         self._busy(True)
         threading.Thread(target=self._do_start, args=(ctx,), daemon=True).start()
 
     def _do_start(self, ctx: str):
         try:
-            reply, msgs = packer.start_conversation(ctx)
+            reply, msgs = packer.start_conversation(ctx, mode=self._mode)
             self._messages = msgs
-            self.after(0, lambda: self._reply(reply))
+            self.after(0, lambda r=reply: self._reply(r))
         except Exception as exc:
-            self.after(0, lambda: self._error(f"Could not reach Claude: {exc}"))
+            self.after(0, lambda e=exc: self._error(f"Could not reach Claude: {e}"))
 
     def _call_claude(self, user_input: str):
         try:
-            reply, msgs = packer.continue_conversation(self._messages, user_input)
+            reply, msgs = packer.continue_conversation(self._messages, user_input, mode=self._mode)
             self._messages = msgs
-            self.after(0, lambda: self._reply(reply))
+            self.after(0, lambda r=reply: self._reply(r))
         except Exception as exc:
-            self.after(0, lambda: self._error(str(exc)))
+            self.after(0, lambda e=exc: self._error(str(e)))
 
     def _reply(self, text: str):
         self._state = "CONVERSATION"

@@ -14,6 +14,37 @@ def get_client() -> anthropic.Anthropic:
     return _client
 
 
+OUTFIT_SYSTEM_PROMPT = """\
+You are a friendly personal stylist who gives outfit recommendations based on weather forecasts.
+
+You will be given weather data for the user's location and date(s). Use it to suggest what to wear.
+
+Your behavior:
+
+1. INITIAL RECOMMENDATION (first response only):
+   - Open with a brief, plain-language weather summary (temperature, conditions).
+   - Suggest one or two complete outfits suitable for the weather, with specific items
+     (e.g. "light jeans + a breathable linen shirt + white sneakers").
+   - Flag any weather-specific accessories (umbrella, sunglasses, light jacket, scarf, etc.).
+
+2. FOLLOW-UP QUESTIONS (all subsequent responses):
+   - Ask exactly ONE follow-up question to refine your suggestions.
+   - Useful questions:
+       - What's your plan for the day? (work, casual, outdoor activity, going out, etc.)
+       - Do you prefer a more casual or dressy look?
+       - Will you be spending most of the day indoors or outdoors?
+       - Are there any colors or styles you tend to avoid?
+       - Do you run warm or cold?
+   - After the user answers, update your outfit suggestions if needed, then ask the next most useful follow-up question.
+   - Do not ask multiple questions at once.
+   - Do not repeat a question you've already asked.
+
+3. ENDING THE CONVERSATION:
+   - If the user says they're satisfied, give a clean final outfit summary and wish them a great day.
+
+Keep your tone warm and concise. Avoid filler phrases.\
+"""
+
 SYSTEM_PROMPT = """\
 You are a practical and knowledgeable travel packing assistant. Your goal is to help the user pack the right amount of clothing — enough to be comfortable, but not so much that they're lugging around a heavy bag unnecessarily.
 
@@ -47,23 +78,28 @@ Keep your tone friendly and concise. Avoid filler phrases.\
 """
 
 
-def start_conversation(weather_context: str) -> tuple[str, list]:
+def start_conversation(weather_context: str, mode: str = "packing") -> tuple[str, list]:
     """
     Send the first message to Claude (weather context + request for initial recommendation).
     Returns (assistant_reply, messages_history).
     """
     client = get_client()
+    system_prompt = OUTFIT_SYSTEM_PROMPT if mode == "outfit" else SYSTEM_PROMPT
 
-    messages = [
-        {
-            "role": "user",
-            "content": (
-                "Here is the weather data for my trip:\n\n"
-                f"{weather_context}\n\n"
-                "Please give me your initial packing recommendation."
-            ),
-        }
-    ]
+    if mode == "outfit":
+        first_message = (
+            "Here is the weather data for my location and date(s):\n\n"
+            f"{weather_context}\n\n"
+            "Please give me your initial outfit recommendation."
+        )
+    else:
+        first_message = (
+            "Here is the weather data for my trip:\n\n"
+            f"{weather_context}\n\n"
+            "Please give me your initial packing recommendation."
+        )
+
+    messages = [{"role": "user", "content": first_message}]
 
     response = client.messages.create(
         model="claude-opus-4-7",
@@ -71,7 +107,7 @@ def start_conversation(weather_context: str) -> tuple[str, list]:
         system=[
             {
                 "type": "text",
-                "text": SYSTEM_PROMPT,
+                "text": system_prompt,
                 "cache_control": {"type": "ephemeral"},
             }
         ],
@@ -83,12 +119,13 @@ def start_conversation(weather_context: str) -> tuple[str, list]:
     return reply, messages
 
 
-def continue_conversation(messages: list, user_input: str) -> tuple[str, list]:
+def continue_conversation(messages: list, user_input: str, mode: str = "packing") -> tuple[str, list]:
     """
     Send the user's next message and get the assistant's reply.
     Returns (assistant_reply, updated_messages_history).
     """
     client = get_client()
+    system_prompt = OUTFIT_SYSTEM_PROMPT if mode == "outfit" else SYSTEM_PROMPT
 
     messages = messages + [{"role": "user", "content": user_input}]
 
@@ -98,7 +135,7 @@ def continue_conversation(messages: list, user_input: str) -> tuple[str, list]:
         system=[
             {
                 "type": "text",
-                "text": SYSTEM_PROMPT,
+                "text": system_prompt,
                 "cache_control": {"type": "ephemeral"},
             }
         ],
