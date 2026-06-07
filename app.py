@@ -30,7 +30,25 @@ def _clean(text: str) -> str:
     return text.strip()
 
 
+_WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+
+
 def _parse_date(raw: str):
+    import re
+    from datetime import date, timedelta
+
+    # "next Friday" / "this Friday"
+    m = re.match(r"^(next|this)\s+(\w+)$", raw.strip(), re.IGNORECASE)
+    if m:
+        modifier, day_name = m.group(1).lower(), m.group(2).lower()
+        if day_name in _WEEKDAYS:
+            target = _WEEKDAYS.index(day_name)
+            today = date.today()
+            days_ahead = (target - today.weekday()) % 7 or 7
+            if modifier == "next":
+                days_ahead += 7
+            return today + timedelta(days=days_ahead)
+
     formats = [
         "%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y",
         "%B %d %Y", "%b %d %Y", "%B %d, %Y", "%b %d, %Y",
@@ -40,6 +58,11 @@ def _parse_date(raw: str):
             return datetime.strptime(raw.strip(), fmt).date()
         except ValueError:
             continue
+
+    import dateparser
+    result = dateparser.parse(raw, settings={"PREFER_DATES_FROM": "future"})
+    if result:
+        return result.date()
     raise ValueError(raw)
 
 

@@ -10,3 +10,4 @@ customtkinter>=5.2.0
 # Utilities
 python-dotenv>=1.0.0
 colorama>=0.4.6
+dateparser>=1.2.0
