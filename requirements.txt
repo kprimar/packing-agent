@@ -1,0 +1,8 @@
+# Claude AI
+anthropic>=0.52.0
+
+# HTTP (weather API)
+requests>=2.32.0
+
+# Utilities
+colorama>=0.4.6
