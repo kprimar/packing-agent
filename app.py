@@ -64,7 +64,50 @@ def _parse_date(raw: str):
     result = dateparser.parse(raw, settings={"PREFER_DATES_FROM": "future"})
     if result:
         return result.date()
+
+    # Last resort: find a date anywhere inside the text (handles "wear tomorrow?", etc.)
+    from dateparser.search import search_dates
+    hits = search_dates(raw, settings={"PREFER_DATES_FROM": "future", "RETURN_AS_TIMEZONE_AWARE": False})
+    if hits:
+        return hits[-1][1].date()
+
     raise ValueError(raw)
+
+
+def _parse_date_range(raw: str):
+    """Parse a date range like 'February 2-15, 2026' or 'Feb 2 - March 15, 2026'.
+    Returns (start_date, end_date) or raises ValueError if not a recognized range."""
+    text = raw.strip()
+
+    # "Month Day1-Day2, Year"  e.g. "February 2-15, 2026"
+    m = re.match(
+        r"^([A-Za-z]+)\s+(\d{1,2})\s*[-–]\s*(\d{1,2}),?\s*(\d{4})$",
+        text,
+    )
+    if m:
+        month, d1, d2, year = m.group(1), m.group(2), m.group(3), m.group(4)
+        return _parse_date(f"{month} {d1}, {year}"), _parse_date(f"{month} {d2}, {year}")
+
+    # "Month Day1 - Month Day2, Year"  e.g. "February 2 - March 15, 2026"
+    m = re.match(
+        r"^([A-Za-z]+)\s+(\d{1,2})\s*[-–]\s*([A-Za-z]+)\s+(\d{1,2}),?\s*(\d{4})$",
+        text,
+    )
+    if m:
+        m1, d1, m2, d2, year = m.group(1), m.group(2), m.group(3), m.group(4), m.group(5)
+        return _parse_date(f"{m1} {d1}, {year}"), _parse_date(f"{m2} {d2}, {year}")
+
+    # "Month Day1 to [Month] Day2, Year"  e.g. "February 2 to 15, 2026" or "Feb 2 to March 15, 2026"
+    m = re.match(
+        r"^([A-Za-z]+)\s+(\d{1,2})\s+to\s+(?:([A-Za-z]+)\s+)?(\d{1,2}),?\s*(\d{4})$",
+        text,
+        re.IGNORECASE,
+    )
+    if m:
+        m1, d1, m2, d2, year = m.group(1), m.group(2), m.group(3) or m.group(1), m.group(4), m.group(5)
+        return _parse_date(f"{m1} {d1}, {year}"), _parse_date(f"{m2} {d2}, {year}")
+
+    raise ValueError(f"Not a recognizable date range: {raw}")
 
 
 def _parse_outfit_date_range(raw: str):
@@ -88,6 +131,11 @@ def _parse_outfit_date_range(raw: str):
     if m:
         n = int(m.group(1))
         return today, today + timedelta(n - 1)
+
+    try:
+        return _parse_date_range(raw)
+    except ValueError:
+        pass
 
     d = _parse_date(raw)
     return d, d
@@ -117,7 +165,7 @@ class PackingAgentApp(ctk.CTk):
             self.after(150, lambda: self._agent_say(
                 f"Hi! Using {_default} as your default location. "
                 "What day would you like outfit recommendations for? "
-                "(e.g. today, tomorrow, this week, or a date like June 10)"
+                "You can say something like 'tomorrow', 'June 10', or just ask — I'll pick out the date."
             ))
         else:
             self.after(150, lambda: self._agent_say("Hi! Where are you traveling to?"))
@@ -279,7 +327,13 @@ class PackingAgentApp(ctk.CTk):
             return
         self._entry.delete(0, "end")
         self._user_say(text)
-        self._route(text)
+        try:
+            self._route(text)
+        except Exception as exc:
+            import traceback
+            self._agent_say(f"Unexpected error: {type(exc).__name__}: {exc}")
+            traceback.print_exc()
+            self._busy(False)
 
     def _route(self, text: str):
         if self._state == "AWAITING_OUTFIT_DATE":
@@ -298,15 +352,25 @@ class PackingAgentApp(ctk.CTk):
         elif self._state == "AWAITING_DESTINATION":
             self._destination = text
             self._state = "AWAITING_START_DATE"
-            self._agent_say("What's your departure date? (e.g. 2026-08-01)")
+            self._agent_say("What are your travel dates? (e.g. August 1, 2026 or August 1-15, 2026)")
 
         elif self._state == "AWAITING_START_DATE":
+            # Try range first so "August 1-15, 2026" skips the return-date prompt
+            try:
+                start, end = _parse_date_range(text)
+                self._start_date = start
+                self._end_date = end
+                self._state = "FETCHING"
+                self._fetch_weather()
+                return
+            except ValueError:
+                pass
             try:
                 self._start_date = _parse_date(text)
                 self._state = "AWAITING_END_DATE"
                 self._agent_say("And your return date?")
             except ValueError:
-                self._agent_say("I couldn't read that date. Try something like 2026-08-01 or August 1, 2026.")
+                self._agent_say("I couldn't read that date. Try something like August 1, 2026 or August 1-15, 2026.")
 
         elif self._state == "AWAITING_END_DATE":
             try:
@@ -318,7 +382,7 @@ class PackingAgentApp(ctk.CTk):
                 self._state = "FETCHING"
                 self._fetch_weather()
             except ValueError:
-                self._agent_say("I couldn't read that date. Try something like 2026-08-17 or August 17, 2026.")
+                self._agent_say("I couldn't read that date. Try something like August 17, 2026.")
 
         elif self._state == "CONVERSATION":
             self._busy(True)

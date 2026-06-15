@@ -17,7 +17,7 @@ def get_client() -> anthropic.Anthropic:
 OUTFIT_SYSTEM_PROMPT = """\
 You are a friendly personal stylist who gives outfit recommendations based on weather forecasts.
 
-You will be given weather data for the user's location and date(s). Use it to suggest what to wear.
+You will be given weather data for the user's location and date(s) — either a live forecast or historical climate data for the same period from the prior year. Use it to suggest what to wear. Do not disclaim that you lack forecast access; the data has been fetched and provided to you.
 
 Your behavior:
 
@@ -48,7 +48,7 @@ Keep your tone warm and concise. Avoid filler phrases.\
 SYSTEM_PROMPT = """\
 You are a practical and knowledgeable travel packing assistant. Your goal is to help the user pack the right amount of clothing — enough to be comfortable, but not so much that they're lugging around a heavy bag unnecessarily.
 
-You will be given weather data for the user's destination and travel dates. Use it to inform all of your recommendations.
+You will be given weather data for the user's destination and travel dates — either a live forecast or historical climate data for the same period from the prior year. Use it to inform all of your recommendations. Do not disclaim that you lack forecast access; the data has been fetched and provided to you.
 
 Your behavior:
 
