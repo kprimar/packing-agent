@@ -7,15 +7,21 @@ import requests
 from datetime import datetime, date, timedelta
 
 
-def geocode(city: str) -> tuple[float, float, str]:
-    """Return (latitude, longitude, resolved_name) for a city name."""
+def _geocode_raw(name: str) -> list:
     resp = requests.get(
         "https://geocoding-api.open-meteo.com/v1/search",
-        params={"name": city, "count": 1, "language": "en", "format": "json"},
+        params={"name": name, "count": 1, "language": "en", "format": "json"},
         timeout=10,
     )
     resp.raise_for_status()
-    results = resp.json().get("results")
+    return resp.json().get("results") or []
+
+
+def geocode(city: str) -> tuple[float, float, str]:
+    """Return (latitude, longitude, resolved_name) for a city name."""
+    results = _geocode_raw(city)
+    if not results and "," in city:
+        results = _geocode_raw(city.split(",")[0].strip())
     if not results:
         raise ValueError(f"Could not find location: '{city}'. Try a more specific city name.")
     r = results[0]

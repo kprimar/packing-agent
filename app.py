@@ -141,6 +141,24 @@ def _parse_outfit_date_range(raw: str):
     return d, d
 
 
+def _parse_outfit_date_and_location(raw: str):
+    """Parse outfit date input that may include an optional 'in <Location>' suffix.
+    Returns (start_date, end_date, location_or_None).
+    """
+    if " in " in raw.lower():
+        parts = raw.rsplit(" in ", 1)
+        date_part = parts[0].strip()
+        loc_part = parts[1].strip()
+        if loc_part:
+            try:
+                start, end = _parse_outfit_date_range(date_part)
+                return start, end, loc_part
+            except ValueError:
+                pass
+    start, end = _parse_outfit_date_range(raw)
+    return start, end, None
+
+
 class PackingAgentApp(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -148,8 +166,8 @@ class PackingAgentApp(ctk.CTk):
         self.geometry("680x740")
         self.minsize(500, 520)
 
-        self._mode = "packing"
-        self._state = "AWAITING_DESTINATION"
+        self._mode = None
+        self._state = "AWAITING_MODE"
         self._destination = None
         self._start_date = None
         self._end_date = None
@@ -157,18 +175,10 @@ class PackingAgentApp(ctk.CTk):
 
         self._build_ui()
 
-        _default = get_default_location()
-        if _default:
-            self._destination = _default
-            self._mode = "outfit"
-            self._state = "AWAITING_OUTFIT_DATE"
-            self.after(150, lambda: self._agent_say(
-                f"Hi! Using {_default} as your default location. "
-                "What day would you like outfit recommendations for? "
-                "You can say something like 'tomorrow', 'June 10', or just ask — I'll pick out the date."
-            ))
-        else:
-            self.after(150, lambda: self._agent_say("Hi! Where are you traveling to?"))
+        self.after(150, lambda: self._agent_say(
+            "Hi! Would you like outfit recommendations for a specific day, "
+            "or help packing for a trip?"
+        ))
 
     # ── Layout ────────────────────────────────────────────────────────────────
 
@@ -226,7 +236,11 @@ class PackingAgentApp(ctk.CTk):
 
     def _bubble(self, text: str, is_user: bool):
         row = self._chat.grid_size()[1]
-        wrap = max(self.winfo_width() - 220, 300)
+        try:
+            w_logical = int(self.geometry().split("x")[0])
+        except Exception:
+            w_logical = 680
+        wrap = max(w_logical - 220, 300)
 
         outer = ctk.CTkFrame(self._chat, fg_color="transparent")
         outer.grid(row=row, column=0, sticky="ew", pady=3, padx=6)
@@ -336,11 +350,46 @@ class PackingAgentApp(ctk.CTk):
             self._busy(False)
 
     def _route(self, text: str):
-        if self._state == "AWAITING_OUTFIT_DATE":
+        if self._state == "AWAITING_MODE":
+            low = text.lower()
+            if any(w in low for w in ("outfit", "wear", "what to wear")):
+                self._mode = "outfit"
+                default = get_default_location()
+                self._state = "AWAITING_OUTFIT_DATE"
+                if default:
+                    self._destination = default
+                    self._agent_say(
+                        f"Okay, for what day? I'll assume we're talking about {default}, "
+                        "unless you specify otherwise."
+                    )
+                else:
+                    self._agent_say(
+                        "Okay, for what day? You can also include a location "
+                        "(e.g. 'tomorrow in Paris'). Or set a default in Settings (⚙)."
+                    )
+            elif any(w in low for w in ("pack", "trip", "travel", "traveling", "travelling")):
+                self._mode = "packing"
+                self._state = "AWAITING_DESTINATION"
+                self._agent_say("Where are you traveling to?")
+            else:
+                self._agent_say(
+                    "I can help with outfit recommendations for a specific day, "
+                    "or with packing for a trip. Which would you like?"
+                )
+
+        elif self._state == "AWAITING_OUTFIT_DATE":
             try:
-                start, end = _parse_outfit_date_range(text)
+                start, end, loc_override = _parse_outfit_date_and_location(text)
                 self._start_date = start
                 self._end_date = end
+                if loc_override:
+                    self._destination = loc_override
+                if not self._destination:
+                    self._agent_say(
+                        "I don't have a default location set. Try something like "
+                        "'tomorrow in Paris', or set a default in Settings (⚙)."
+                    )
+                    return
                 self._state = "FETCHING"
                 self._fetch_weather()
             except ValueError:
