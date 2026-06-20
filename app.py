@@ -16,7 +16,10 @@ load_dotenv()
 
 from agent.weather import get_weather, format_weather_context
 from agent import packer
-from agent.config import get_default_location, set_default_location, clear_default_location
+from agent.config import (
+    get_default_location, set_default_location, clear_default_location,
+    get_work_days, set_work_days, get_dress_code, set_dress_code,
+)
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -283,54 +286,112 @@ class PackingAgentApp(ctk.CTk):
     def _open_settings(self):
         dialog = ctk.CTkToplevel(self)
         dialog.title("Settings")
-        dialog.geometry("380x200")
+        dialog.geometry("430x400")
         dialog.resizable(False, False)
         dialog.grab_set()
 
-        ctk.CTkLabel(
-            dialog, text="Default location",
-            font=ctk.CTkFont(size=15, weight="bold"),
-        ).pack(pady=(24, 8))
+        content = ctk.CTkFrame(dialog, fg_color="transparent")
+        content.pack(fill="both", expand=True, padx=24, pady=20)
 
-        entry = ctk.CTkEntry(
-            dialog, width=280,
-            placeholder_text="e.g. London, New York, Tokyo",
-            font=ctk.CTkFont(size=13),
+        # ── Default location ──────────────────────────────────────────────────
+        ctk.CTkLabel(
+            content, text="Default location",
+            font=ctk.CTkFont(size=14, weight="bold"), anchor="w",
+        ).pack(fill="x", pady=(0, 6))
+
+        loc_row = ctk.CTkFrame(content, fg_color="transparent")
+        loc_row.pack(fill="x")
+        loc_row.grid_columnconfigure(0, weight=1)
+
+        loc_entry = ctk.CTkEntry(
+            loc_row, placeholder_text="e.g. London, New York, Tokyo",
+            font=ctk.CTkFont(size=13), height=36,
         )
         current = get_default_location()
         if current:
-            entry.insert(0, current)
-        entry.pack()
+            loc_entry.insert(0, current)
+        loc_entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
 
-        status = ctk.CTkLabel(dialog, text="", font=ctk.CTkFont(size=12), text_color=("red", "#ff6b6b"))
-        status.pack(pady=(4, 0))
+        ctk.CTkButton(
+            loc_row, text="Clear", width=70, height=36,
+            fg_color=("gray60", "gray35"), hover_color=("gray50", "gray25"),
+            command=lambda: loc_entry.delete(0, "end"),
+        ).grid(row=0, column=1)
+
+        status = ctk.CTkLabel(
+            content, text="", font=ctk.CTkFont(size=12),
+            text_color=("red", "#ff6b6b"), anchor="w",
+        )
+        status.pack(fill="x", pady=(4, 0))
+
+        # ── Work / school days ────────────────────────────────────────────────
+        ctk.CTkLabel(
+            content, text="Work / school days",
+            font=ctk.CTkFont(size=14, weight="bold"), anchor="w",
+        ).pack(fill="x", pady=(16, 8))
+
+        days_frame = ctk.CTkFrame(content, fg_color="transparent")
+        days_frame.pack(fill="x")
+
+        _SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        _FULL  = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+        saved_days = get_work_days()
+        day_vars = {}
+        for i, (short, full) in enumerate(zip(_SHORT, _FULL)):
+            var = ctk.BooleanVar(value=full in saved_days)
+            day_vars[full] = var
+            ctk.CTkCheckBox(
+                days_frame, text=short, variable=var,
+                width=52, checkbox_width=18, checkbox_height=18,
+                font=ctk.CTkFont(size=12),
+            ).grid(row=0, column=i, padx=2)
+
+        # ── Dress code ────────────────────────────────────────────────────────
+        ctk.CTkLabel(
+            content, text="Dress code at work / school",
+            font=ctk.CTkFont(size=14, weight="bold"), anchor="w",
+        ).pack(fill="x", pady=(20, 8))
+
+        dress_codes = ["Casual", "Business Casual", "Business Formal"]
+        saved_code = get_dress_code() or dress_codes[0]
+        dress_var = ctk.StringVar(value=saved_code)
+
+        ctk.CTkOptionMenu(
+            content, values=dress_codes, variable=dress_var,
+            width=220, font=ctk.CTkFont(size=13),
+        ).pack(anchor="w")
+
+        # ── Buttons ───────────────────────────────────────────────────────────
+        btn_row = ctk.CTkFrame(content, fg_color="transparent")
+        btn_row.pack(pady=(24, 0))
 
         def _save():
-            loc = entry.get().strip()
-            if not loc:
-                dialog.destroy()
-                return
-            status.configure(text="Checking location…")
-            dialog.update()
-            try:
-                from agent.weather import geocode
-                _, _, resolved = geocode(loc)
-                set_default_location(loc)
-                dialog.destroy()
-            except Exception:
-                status.configure(text=f"Location not found. Try a city name like 'Vancouver' or 'Tokyo'.")
+            loc = loc_entry.get().strip()
+            if loc:
+                status.configure(text="Checking location…")
+                dialog.update()
+                try:
+                    from agent.weather import geocode
+                    geocode(loc)
+                    set_default_location(loc)
+                except Exception:
+                    status.configure(
+                        text="Location not found. Try a city name like 'Vancouver' or 'Tokyo'."
+                    )
+                    return
+            else:
+                clear_default_location()
 
-        def _clear():
-            clear_default_location()
+            set_work_days([full for full, var in day_vars.items() if var.get()])
+            set_dress_code(dress_var.get())
             dialog.destroy()
 
-        btn_row = ctk.CTkFrame(dialog, fg_color="transparent")
-        btn_row.pack(pady=18)
         ctk.CTkButton(btn_row, text="Save", width=110, command=_save).grid(row=0, column=0, padx=8)
         ctk.CTkButton(
-            btn_row, text="Clear default",
-            width=110, fg_color=("gray60", "gray35"), hover_color=("gray50", "gray25"),
-            command=_clear,
+            btn_row, text="Cancel", width=110,
+            fg_color=("gray60", "gray35"), hover_color=("gray50", "gray25"),
+            command=dialog.destroy,
         ).grid(row=0, column=1, padx=8)
 
     # ── Input routing ─────────────────────────────────────────────────────────
@@ -439,6 +500,16 @@ class PackingAgentApp(ctk.CTk):
 
     # ── Background work ───────────────────────────────────────────────────────
 
+    def _build_user_context(self) -> str:
+        parts = []
+        work_days = get_work_days()
+        dress_code = get_dress_code()
+        if work_days:
+            parts.append(f"Work/school days: {', '.join(work_days)}")
+        if dress_code:
+            parts.append(f"Dress code on work/school days: {dress_code}")
+        return "\n".join(parts)
+
     def _fetch_weather(self):
         self._busy(True, "Fetching weather…")
         self._agent_say(f"Fetching weather for {self._destination}…")
@@ -470,11 +541,12 @@ class PackingAgentApp(ctk.CTk):
                     "so I'm using historical data from the same period last year."
                 )
         self._busy(True)
-        threading.Thread(target=self._do_start, args=(ctx,), daemon=True).start()
+        user_ctx = self._build_user_context()
+        threading.Thread(target=self._do_start, args=(ctx, user_ctx), daemon=True).start()
 
-    def _do_start(self, ctx: str):
+    def _do_start(self, ctx: str, user_ctx: str = ""):
         try:
-            reply, msgs = packer.start_conversation(ctx, mode=self._mode)
+            reply, msgs = packer.start_conversation(ctx, mode=self._mode, user_context=user_ctx)
             self._messages = msgs
             self.after(0, lambda r=reply: self._reply(r))
         except Exception as exc:

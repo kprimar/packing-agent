@@ -1,3 +1,11 @@
 {
-  "default_location": "Vancouver"
+  "default_location": "Vancouver",
+  "work_days": [
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday"
+  ],
+  "dress_code": "Casual"
 }

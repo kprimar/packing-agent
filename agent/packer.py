@@ -78,7 +78,7 @@ Keep your tone friendly and concise. Avoid filler phrases.\
 """
 
 
-def start_conversation(weather_context: str, mode: str = "packing") -> tuple[str, list]:
+def start_conversation(weather_context: str, mode: str = "packing", user_context: str = "") -> tuple[str, list]:
     """
     Send the first message to Claude (weather context + request for initial recommendation).
     Returns (assistant_reply, messages_history).
@@ -90,14 +90,18 @@ def start_conversation(weather_context: str, mode: str = "packing") -> tuple[str
         first_message = (
             "Here is the weather data for my location and date(s):\n\n"
             f"{weather_context}\n\n"
-            "Please give me your initial outfit recommendation."
         )
+        if user_context:
+            first_message += f"Additional context about me:\n{user_context}\n\n"
+        first_message += "Please give me your initial outfit recommendation."
     else:
         first_message = (
             "Here is the weather data for my trip:\n\n"
             f"{weather_context}\n\n"
-            "Please give me your initial packing recommendation."
         )
+        if user_context:
+            first_message += f"Additional context about me:\n{user_context}\n\n"
+        first_message += "Please give me your initial packing recommendation."
 
     messages = [{"role": "user", "content": first_message}]
 

@@ -31,3 +31,23 @@ def clear_default_location():
     config = _load()
     config.pop('default_location', None)
     _save(config)
+
+
+def get_work_days() -> list[str]:
+    return _load().get('work_days', [])
+
+
+def set_work_days(days: list[str]):
+    config = _load()
+    config['work_days'] = days
+    _save(config)
+
+
+def get_dress_code() -> str | None:
+    return _load().get('dress_code')
+
+
+def set_dress_code(code: str):
+    config = _load()
+    config['dress_code'] = code
+    _save(config)
