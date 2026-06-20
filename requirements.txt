@@ -7,6 +7,11 @@ requests>=2.32.0
 # Desktop UI
 customtkinter>=5.2.0
 
+# Google (Gmail API for daily outfit emails)
+google-auth>=2.29.0
+google-auth-oauthlib>=1.2.0
+google-api-python-client>=2.131.0
+
 # Utilities
 python-dotenv>=1.0.0
 colorama>=0.4.6

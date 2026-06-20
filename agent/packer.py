@@ -78,6 +78,46 @@ Keep your tone friendly and concise. Avoid filler phrases.\
 """
 
 
+EMAIL_OUTFIT_PROMPT = """\
+You are a personal stylist giving a one-shot daily outfit recommendation by email.
+
+You will receive context about tomorrow — whether it is a work/school day, the dress code if so,
+and the weather forecast for the user's location.
+
+Write a concise, complete recommendation that includes:
+- A brief plain-language weather summary (temperature and conditions).
+- One or two specific outfit suggestions tailored to the weather and occasion,
+  with concrete items (e.g. "slim chinos + a button-down shirt + white sneakers").
+- Any weather-specific accessories (umbrella, sunglasses, scarf, light jacket, etc.).
+
+If it is a work/school day, all outfits must meet the stated dress code.
+If it is a day off, suggest something comfortable and appropriate for the weather.
+
+Do NOT ask follow-up questions. Give the full recommendation in a single response.
+Keep it under 200 words. Write in plain text — no markdown, no bullet symbols, no asterisks.\
+"""
+
+
+def get_outfit_email_recommendation(weather_context: str, user_context: str) -> tuple[str, list]:
+    """Single-shot outfit recommendation for the daily email. No follow-up questions."""
+    client = get_client()
+    message = (
+        f"{user_context}\n\n"
+        f"Weather for tomorrow:\n\n{weather_context}\n\n"
+        "Give me my outfit recommendation for tomorrow."
+    )
+    messages = [{"role": "user", "content": message}]
+    response = client.messages.create(
+        model="claude-opus-4-7",
+        max_tokens=512,
+        system=[{"type": "text", "text": EMAIL_OUTFIT_PROMPT, "cache_control": {"type": "ephemeral"}}],
+        messages=messages,
+    )
+    reply = response.content[0].text
+    messages.append({"role": "assistant", "content": reply})
+    return reply, messages
+
+
 def start_conversation(weather_context: str, mode: str = "packing", user_context: str = "") -> tuple[str, list]:
     """
     Send the first message to Claude (weather context + request for initial recommendation).
