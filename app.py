@@ -144,16 +144,20 @@ def _parse_outfit_date_range(raw: str):
 
 
 def _parse_outfit_date_and_location(raw: str):
-    if " in " in raw.lower():
-        parts = raw.rsplit(" in ", 1)
-        date_part = parts[0].strip()
-        loc_part = parts[1].strip()
-        if loc_part:
-            try:
-                start, end = _parse_outfit_date_range(date_part)
-                return start, end, loc_part
-            except ValueError:
-                pass
+    raw = raw.strip()
+    low = raw.lower()
+    for sep in (" in ", " to "):
+        if sep in low:
+            idx = low.rfind(sep)
+            date_part = raw[:idx].strip()
+            loc_part = raw[idx + len(sep):].strip()
+            # Skip if loc_part starts with a digit — likely a date range ("Feb 2 to 15")
+            if date_part and loc_part and not loc_part[0].isdigit():
+                try:
+                    start, end = _parse_outfit_date_range(date_part)
+                    return start, end, loc_part
+                except ValueError:
+                    pass
     start, end = _parse_outfit_date_range(raw)
     return start, end, None
 
