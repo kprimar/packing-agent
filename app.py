@@ -21,12 +21,22 @@ from agent.config import (
     get_work_days, set_work_days, get_dress_code, set_dress_code,
 )
 
-ctk.set_appearance_mode("dark")
+ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
+
+_BG          = "#ffffff"
+_CARD_BG     = "#d9d9d9"
+_CARD_BORDER = "#151414"
+_AGENT_CLR   = "#c3bde2"
+_USER_CLR    = "#77b4ff"
+_TEXT        = "#000000"
+_BTN_CLR     = "#d9d9d9"
+_BTN_HOVER   = "#c4c4c4"
+_PH_TEXT     = "Type a message…"
+_PH_COLOR    = "#635e5e"
 
 
 def _clean(text: str) -> str:
-    """Strip basic markdown so plain text reads cleanly in a label."""
     text = re.sub(r"\*\*(.*?)\*\*", r"\1", text)
     text = re.sub(r"\*(.*?)\*", r"\1", text)
     text = re.sub(r"^#{1,3}\s+", "", text, flags=re.MULTILINE)
@@ -41,7 +51,6 @@ def _parse_date(raw: str):
     import re
     from datetime import date, timedelta
 
-    # "next Friday" / "this Friday"
     m = re.match(r"^(next|this)\s+(\w+)$", raw.strip(), re.IGNORECASE)
     if m:
         modifier, day_name = m.group(1).lower(), m.group(2).lower()
@@ -68,7 +77,6 @@ def _parse_date(raw: str):
     if result:
         return result.date()
 
-    # Last resort: find a date anywhere inside the text (handles "wear tomorrow?", etc.)
     from dateparser.search import search_dates
     hits = search_dates(raw, settings={"PREFER_DATES_FROM": "future", "RETURN_AS_TIMEZONE_AWARE": False})
     if hits:
@@ -78,43 +86,34 @@ def _parse_date(raw: str):
 
 
 def _parse_date_range(raw: str):
-    """Parse a date range like 'February 2-15, 2026' or 'Feb 2 - March 15, 2026'.
-    Returns (start_date, end_date) or raises ValueError if not a recognized range."""
     text = raw.strip()
 
-    # "Month Day1-Day2, Year"  e.g. "February 2-15, 2026"
-    m = re.match(
-        r"^([A-Za-z]+)\s+(\d{1,2})\s*[-–]\s*(\d{1,2}),?\s*(\d{4})$",
-        text,
-    )
+    m = re.match(r"^([A-Za-z]+)\s+(\d{1,2})\s*[-–]\s*(\d{1,2}),?\s*(\d{4})$", text)
     if m:
         month, d1, d2, year = m.group(1), m.group(2), m.group(3), m.group(4)
         return _parse_date(f"{month} {d1}, {year}"), _parse_date(f"{month} {d2}, {year}")
 
-    # "Month Day1 - Month Day2, Year"  e.g. "February 2 - March 15, 2026"
     m = re.match(
-        r"^([A-Za-z]+)\s+(\d{1,2})\s*[-–]\s*([A-Za-z]+)\s+(\d{1,2}),?\s*(\d{4})$",
-        text,
+        r"^([A-Za-z]+)\s+(\d{1,2})\s*[-–]\s*([A-Za-z]+)\s+(\d{1,2}),?\s*(\d{4})$", text
     )
     if m:
         m1, d1, m2, d2, year = m.group(1), m.group(2), m.group(3), m.group(4), m.group(5)
         return _parse_date(f"{m1} {d1}, {year}"), _parse_date(f"{m2} {d2}, {year}")
 
-    # "Month Day1 to [Month] Day2, Year"  e.g. "February 2 to 15, 2026" or "Feb 2 to March 15, 2026"
     m = re.match(
         r"^([A-Za-z]+)\s+(\d{1,2})\s+to\s+(?:([A-Za-z]+)\s+)?(\d{1,2}),?\s*(\d{4})$",
-        text,
-        re.IGNORECASE,
+        text, re.IGNORECASE,
     )
     if m:
-        m1, d1, m2, d2, year = m.group(1), m.group(2), m.group(3) or m.group(1), m.group(4), m.group(5)
+        m1, d1, m2, d2, year = (
+            m.group(1), m.group(2), m.group(3) or m.group(1), m.group(4), m.group(5)
+        )
         return _parse_date(f"{m1} {d1}, {year}"), _parse_date(f"{m2} {d2}, {year}")
 
     raise ValueError(f"Not a recognizable date range: {raw}")
 
 
 def _parse_outfit_date_range(raw: str):
-    """Return (start_date, end_date) for natural outfit-date inputs like 'today', 'this week'."""
     import re
     from datetime import date, timedelta
 
@@ -145,9 +144,6 @@ def _parse_outfit_date_range(raw: str):
 
 
 def _parse_outfit_date_and_location(raw: str):
-    """Parse outfit date input that may include an optional 'in <Location>' suffix.
-    Returns (start_date, end_date, location_or_None).
-    """
     if " in " in raw.lower():
         parts = raw.rsplit(" in ", 1)
         date_part = parts[0].strip()
@@ -166,8 +162,9 @@ class PackingAgentApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("Packing Agent")
-        self.geometry("680x740")
-        self.minsize(500, 520)
+        self.geometry("480x860")
+        self.minsize(400, 620)
+        self.configure(fg_color=_BG)
 
         self._mode = None
         self._state = "AWAITING_MODE"
@@ -175,6 +172,8 @@ class PackingAgentApp(ctk.CTk):
         self._start_date = None
         self._end_date = None
         self._messages = []
+        self._ph_active = True
+        self._is_busy = False
 
         self._build_ui()
 
@@ -182,57 +181,155 @@ class PackingAgentApp(ctk.CTk):
             self.after(150, self._launch_daily_outfit)
         else:
             self.after(150, lambda: self._agent_say(
-                "Hi! Would you like outfit recommendations for a specific day, "
-                "or help packing for a trip?"
+                "Hi! I can help you with outfit recommendations for a specific day, "
+                "or help you pack for a trip."
             ))
 
-    # ── Layout ────────────────────────────────────────────────────────────────
+    # ── Layout ─────────────────────────────────────────────────────────────────
 
     def _build_ui(self):
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
 
+        # Header
         header = ctk.CTkFrame(self, fg_color="transparent")
-        header.grid(row=0, column=0, sticky="ew", padx=16, pady=(12, 0))
+        header.grid(row=0, column=0, sticky="ew", padx=16, pady=(20, 8))
         header.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(
-            header, text="Packing Agent",
-            font=ctk.CTkFont(size=22, weight="bold"),
-        ).grid(row=0, column=0, pady=6)
+        self._title_lbl = ctk.CTkLabel(
+            header, text="Hi there!",
+            font=ctk.CTkFont(family="Segoe UI", size=32, weight="bold"),
+            text_color=_TEXT, anchor="w",
+        )
+        self._title_lbl.grid(row=0, column=0, sticky="w")
 
         ctk.CTkButton(
-            header, text="⚙",
-            width=36, height=36,
-            font=ctk.CTkFont(size=18),
-            fg_color="transparent",
-            hover_color=("gray80", "gray25"),
-            command=self._open_settings,
-        ).grid(row=0, column=1, sticky="e")
+            header, text="↺", width=40, height=40,
+            font=ctk.CTkFont(size=20), corner_radius=20,
+            fg_color="transparent", text_color="#434343",
+            hover_color="#e8e8e8", command=self._on_refresh,
+        ).grid(row=0, column=1, sticky="e", padx=(0, 4))
 
-        self._chat = ctk.CTkScrollableFrame(self, fg_color=("gray88", "gray13"))
-        self._chat.grid(row=1, column=0, padx=16, pady=8, sticky="nsew")
+        ctk.CTkButton(
+            header, text="⚙", width=40, height=40,
+            font=ctk.CTkFont(size=18), corner_radius=20,
+            fg_color="transparent", text_color="#434343",
+            hover_color="#e8e8e8", command=self._open_settings,
+        ).grid(row=0, column=2, sticky="e")
+
+        # Chat card
+        chat_card = ctk.CTkFrame(
+            self, fg_color=_CARD_BG, corner_radius=0,
+            border_width=2, border_color=_CARD_BORDER,
+        )
+        chat_card.grid(row=1, column=0, padx=10, pady=(0, 8), sticky="nsew")
+        chat_card.grid_columnconfigure(0, weight=1)
+        chat_card.grid_rowconfigure(0, weight=1)
+
+        self._chat = ctk.CTkScrollableFrame(chat_card, fg_color="transparent")
+        self._chat.grid(row=0, column=0, padx=4, pady=4, sticky="nsew")
         self._chat.grid_columnconfigure(0, weight=1)
 
-        bar = ctk.CTkFrame(self, fg_color="transparent")
-        bar.grid(row=2, column=0, padx=16, pady=(0, 16), sticky="ew")
-        bar.grid_columnconfigure(0, weight=1)
+        # Bottom section
+        self._bottom = ctk.CTkFrame(self, fg_color="transparent")
+        self._bottom.grid(row=2, column=0, padx=10, pady=(0, 16), sticky="ew")
+        self._bottom.grid_columnconfigure(0, weight=1)
 
-        self._entry = ctk.CTkEntry(
-            bar, placeholder_text="Type a message…",
-            height=44, font=ctk.CTkFont(size=14),
+        # Mode buttons frame
+        self._mode_frm = ctk.CTkFrame(self._bottom, fg_color="transparent")
+        self._mode_frm.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            self._mode_frm, text="Anything else I can help with?",
+            font=ctk.CTkFont(size=15), text_color=_TEXT,
+        ).grid(row=0, column=0, pady=(4, 10))
+
+        ctk.CTkButton(
+            self._mode_frm, text="I need an outfit recommendation",
+            height=50, corner_radius=25,
+            fg_color=_BTN_CLR, hover_color=_BTN_HOVER,
+            text_color=_TEXT, font=ctk.CTkFont(size=14),
+            command=lambda: self._click_mode("outfit"),
+        ).grid(row=1, column=0, sticky="ew", pady=(0, 8))
+
+        ctk.CTkButton(
+            self._mode_frm, text="I need help packing for a trip",
+            height=50, corner_radius=25,
+            fg_color=_BTN_CLR, hover_color=_BTN_HOVER,
+            text_color=_TEXT, font=ctk.CTkFont(size=14),
+            command=lambda: self._click_mode("packing"),
+        ).grid(row=2, column=0, sticky="ew")
+
+        # Input frame
+        self._input_frm = ctk.CTkFrame(self._bottom, fg_color="transparent")
+        self._input_frm.grid_columnconfigure(0, weight=1)
+
+        input_card = ctk.CTkFrame(
+            self._input_frm, fg_color=_CARD_BG, corner_radius=0,
+            border_width=2, border_color=_CARD_BORDER,
         )
-        self._entry.grid(row=0, column=0, padx=(0, 10), sticky="ew")
-        self._entry.bind("<Return>", lambda _e: self._on_send())
+        input_card.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        input_card.grid_columnconfigure(0, weight=1)
+
+        self._entry = ctk.CTkTextbox(
+            input_card, height=80, font=ctk.CTkFont(size=14),
+            fg_color="transparent", text_color=_PH_COLOR,
+            border_width=0, wrap="word", activate_scrollbars=False,
+        )
+        self._entry.grid(row=0, column=0, sticky="ew", padx=10, pady=8)
+        self._entry.insert("1.0", _PH_TEXT)
+        self._entry.bind("<FocusIn>", self._ph_focus_in)
+        self._entry.bind("<FocusOut>", self._ph_focus_out)
+        self._entry.bind("<Return>", self._on_enter_key)
 
         self._btn = ctk.CTkButton(
-            bar, text="Send", width=90, height=44,
-            font=ctk.CTkFont(size=14), command=self._on_send,
+            self._input_frm, text="Send",
+            height=50, corner_radius=25,
+            fg_color=_BTN_CLR, hover_color=_BTN_HOVER,
+            text_color=_TEXT, font=ctk.CTkFont(size=14),
+            command=self._on_send,
         )
-        self._btn.grid(row=0, column=1)
-        self._entry.focus()
+        self._btn.grid(row=1, column=0, sticky="ew")
 
-    # ── Bubbles ───────────────────────────────────────────────────────────────
+        self._show_mode_buttons()
+
+    def _show_mode_buttons(self):
+        self._input_frm.grid_remove()
+        self._mode_frm.grid(row=0, column=0, sticky="ew")
+
+    def _show_input(self):
+        self._mode_frm.grid_remove()
+        self._input_frm.grid(row=0, column=0, sticky="ew")
+
+    def _set_title(self, text: str):
+        self._title_lbl.configure(text=text)
+
+    # ── Placeholder ────────────────────────────────────────────────────────────
+
+    def _ph_focus_in(self, _e):
+        if self._ph_active:
+            self._entry.delete("1.0", "end")
+            self._entry.configure(text_color=_TEXT)
+            self._ph_active = False
+
+    def _ph_focus_out(self, _e):
+        if not self._entry.get("1.0", "end-1c").strip():
+            self._entry.insert("1.0", _PH_TEXT)
+            self._entry.configure(text_color=_PH_COLOR)
+            self._ph_active = True
+
+    def _get_input(self) -> str:
+        if self._ph_active:
+            return ""
+        return self._entry.get("1.0", "end-1c").strip()
+
+    def _clear_input(self):
+        self._entry.delete("1.0", "end")
+        self._entry.insert("1.0", _PH_TEXT)
+        self._entry.configure(text_color=_PH_COLOR)
+        self._ph_active = True
+
+    # ── Bubbles ────────────────────────────────────────────────────────────────
 
     def _agent_say(self, text: str):
         self._bubble(text, is_user=False)
@@ -245,25 +342,25 @@ class PackingAgentApp(ctk.CTk):
         try:
             w_logical = int(self.geometry().split("x")[0])
         except Exception:
-            w_logical = 680
-        wrap = max(w_logical - 220, 300)
+            w_logical = 480
+        wrap = max(w_logical - 160, 240)
 
         outer = ctk.CTkFrame(self._chat, fg_color="transparent")
-        outer.grid(row=row, column=0, sticky="ew", pady=3, padx=6)
+        outer.grid(row=row, column=0, sticky="ew", pady=4, padx=8)
         outer.grid_columnconfigure(0 if is_user else 1, weight=1)
 
-        color = ("#2b5ea7", "#2b5ea7") if is_user else ("#d4d4d4", "#2d2d2d")
-        tcolor = ("white", "white") if is_user else ("black", "white")
-
-        frame = ctk.CTkFrame(outer, fg_color=color, corner_radius=14)
+        frame = ctk.CTkFrame(
+            outer,
+            fg_color=_USER_CLR if is_user else _AGENT_CLR,
+            corner_radius=15,
+        )
         frame.grid(row=0, column=1 if is_user else 0, sticky="e" if is_user else "w")
 
         ctk.CTkLabel(
             frame, text=text,
             wraplength=wrap, justify="left", anchor="w",
-            text_color=tcolor,
-            font=ctk.CTkFont(size=13),
-        ).pack(padx=14, pady=9)
+            text_color=_TEXT, font=ctk.CTkFont(size=13),
+        ).pack(padx=14, pady=10)
 
         self.after(80, self._scroll_bottom)
 
@@ -273,33 +370,62 @@ class PackingAgentApp(ctk.CTk):
         except Exception:
             pass
 
-    # ── Busy state ────────────────────────────────────────────────────────────
+    # ── Busy state ─────────────────────────────────────────────────────────────
 
     def _busy(self, on: bool, label: str = "Thinking…"):
+        self._is_busy = on
         if on:
             self._btn.configure(text=label, state="disabled")
-            self._entry.configure(state="disabled")
         else:
             self._btn.configure(text="Send", state="normal")
-            self._entry.configure(state="normal")
-            self._entry.focus()
 
-    # ── Daily outfit on launch ────────────────────────────────────────────────
+    # ── Mode selection ─────────────────────────────────────────────────────────
+
+    def _click_mode(self, mode: str):
+        if mode == "outfit":
+            self._user_say("I need an outfit recommendation")
+            self._show_input()
+            self._route("outfit")
+        else:
+            self._user_say("I need help packing for a trip")
+            self._show_input()
+            self._route("pack")
+
+    # ── Refresh ────────────────────────────────────────────────────────────────
+
+    def _on_refresh(self):
+        for widget in self._chat.winfo_children():
+            widget.destroy()
+        self._mode = None
+        self._state = "AWAITING_MODE"
+        self._destination = None
+        self._start_date = None
+        self._end_date = None
+        self._messages = []
+        self._is_busy = False
+        self._set_title("Hi there!")
+        self._clear_input()
+        self._show_mode_buttons()
+        if get_default_location():
+            self.after(150, self._launch_daily_outfit)
+        else:
+            self.after(150, lambda: self._agent_say(
+                "Hi! I can help you with outfit recommendations for a specific day, "
+                "or help you pack for a trip."
+            ))
+
+    # ── Daily outfit on launch ─────────────────────────────────────────────────
 
     def _launch_daily_outfit(self):
         from datetime import date, timedelta
         tomorrow = date.today() + timedelta(days=1)
-        self._mode = "outfit"
-        self._destination = get_default_location()
-        self._start_date = tomorrow
-        self._end_date = tomorrow
-        self._agent_say(f"Good morning! Let me grab tomorrow's outfit for {self._destination}…")
-        self._busy(True, "Fetching weather…")
-        threading.Thread(target=self._do_daily_outfit, daemon=True).start()
+        location = get_default_location()
+        self._agent_say(f"Good morning! Let me grab tomorrow's outfit for {location}…")
+        threading.Thread(
+            target=self._do_daily_outfit, args=(location, tomorrow), daemon=True
+        ).start()
 
-    def _do_daily_outfit(self):
-        from datetime import date, timedelta
-        tomorrow = date.today() + timedelta(days=1)
+    def _do_daily_outfit(self, location, tomorrow):
         day_name = tomorrow.strftime("%A")
         work_days = get_work_days()
         dress_code = get_dress_code()
@@ -313,87 +439,113 @@ class PackingAgentApp(ctk.CTk):
             user_context = f"Tomorrow is {day_name} — a day off, no work or school."
 
         try:
-            w = get_weather(self._destination, tomorrow.isoformat(), tomorrow.isoformat())
+            w = get_weather(location, tomorrow.isoformat(), tomorrow.isoformat())
             ctx = format_weather_context(w)
             if w.get("is_historical"):
                 user_context += " (Weather is based on historical data — live forecast unavailable this far out.)"
-            reply, msgs = packer.get_outfit_email_recommendation(ctx, user_context)
-            self._messages = msgs
-            self.after(0, lambda r=reply: self._reply(r))
+            reply, _ = packer.get_outfit_email_recommendation(ctx, user_context)
+            self.after(0, lambda r=reply: self._agent_say(_clean(r)))
         except Exception as exc:
-            self.after(0, lambda e=exc: self._error(f"Could not load daily outfit: {e}"))
+            self.after(0, lambda e=exc: self._agent_say(f"Could not load daily outfit: {e}"))
 
-    # ── Settings dialog ───────────────────────────────────────────────────────
+    # ── Settings dialog ────────────────────────────────────────────────────────
 
     def _open_settings(self):
         dialog = ctk.CTkToplevel(self)
         dialog.title("Settings")
-        dialog.geometry("430x400")
+        dialog.geometry("440x530")
         dialog.resizable(False, False)
+        dialog.configure(fg_color=_BG)
         dialog.grab_set()
 
-        content = ctk.CTkFrame(dialog, fg_color="transparent")
-        content.pack(fill="both", expand=True, padx=24, pady=20)
-
-        # ── Default location ──────────────────────────────────────────────────
         ctk.CTkLabel(
-            content, text="Default location",
-            font=ctk.CTkFont(size=14, weight="bold"), anchor="w",
-        ).pack(fill="x", pady=(0, 6))
+            dialog, text="Settings",
+            font=ctk.CTkFont(family="Segoe UI", size=32, weight="bold"),
+            text_color=_TEXT, anchor="w",
+        ).pack(fill="x", padx=16, pady=(20, 12))
 
+        content = ctk.CTkFrame(dialog, fg_color="transparent")
+        content.pack(fill="both", expand=True, padx=16, pady=0)
+
+        # Location
         loc_row = ctk.CTkFrame(content, fg_color="transparent")
-        loc_row.pack(fill="x")
+        loc_row.pack(fill="x", pady=(0, 4))
         loc_row.grid_columnconfigure(0, weight=1)
 
+        loc_card = ctk.CTkFrame(
+            loc_row, fg_color=_CARD_BG, corner_radius=0,
+            border_width=2, border_color=_CARD_BORDER,
+        )
+        loc_card.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        loc_card.grid_columnconfigure(0, weight=1)
+
         loc_entry = ctk.CTkEntry(
-            loc_row, placeholder_text="e.g. London, New York, Tokyo",
-            font=ctk.CTkFont(size=13), height=36,
+            loc_card, placeholder_text="Enter Location",
+            font=ctk.CTkFont(size=14), height=45,
+            fg_color="transparent", border_width=0,
+            text_color=_TEXT, placeholder_text_color=_PH_COLOR,
         )
         current = get_default_location()
         if current:
             loc_entry.insert(0, current)
-        loc_entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        loc_entry.grid(row=0, column=0, sticky="ew", padx=8)
 
         ctk.CTkButton(
-            loc_row, text="Clear", width=70, height=36,
-            fg_color=("gray60", "gray35"), hover_color=("gray50", "gray25"),
+            loc_row, text="Clear", width=80, height=49,
+            corner_radius=8,
+            fg_color=_BTN_CLR, hover_color=_BTN_HOVER,
+            text_color=_TEXT, font=ctk.CTkFont(size=14),
             command=lambda: loc_entry.delete(0, "end"),
         ).grid(row=0, column=1)
 
-        status = ctk.CTkLabel(
+        status_lbl = ctk.CTkLabel(
             content, text="", font=ctk.CTkFont(size=12),
-            text_color=("red", "#ff6b6b"), anchor="w",
+            text_color="#cc0000", anchor="w",
         )
-        status.pack(fill="x", pady=(4, 0))
+        status_lbl.pack(fill="x", pady=(2, 10))
 
-        # ── Work / school days ────────────────────────────────────────────────
+        # Work days
         ctk.CTkLabel(
-            content, text="Work / school days",
-            font=ctk.CTkFont(size=14, weight="bold"), anchor="w",
-        ).pack(fill="x", pady=(16, 8))
+            content, text="School / Work Days",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color=_TEXT, anchor="w",
+        ).pack(fill="x", pady=(0, 8))
 
         days_frame = ctk.CTkFrame(content, fg_color="transparent")
-        days_frame.pack(fill="x")
+        days_frame.pack(fill="x", pady=(0, 14))
+        for col in range(4):
+            days_frame.grid_columnconfigure(col, weight=1)
 
         _SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
         _FULL  = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-
         saved_days = get_work_days()
         day_vars = {}
+
         for i, (short, full) in enumerate(zip(_SHORT, _FULL)):
+            row_idx = 0 if i < 4 else 1
+            col_idx = i if i < 4 else i - 4
             var = ctk.BooleanVar(value=full in saved_days)
             day_vars[full] = var
+            cell = ctk.CTkFrame(days_frame, fg_color="transparent")
+            cell.grid(row=row_idx, column=col_idx, padx=4, pady=4, sticky="n")
+            ctk.CTkLabel(
+                cell, text=short, font=ctk.CTkFont(size=13),
+                text_color=_TEXT, anchor="center",
+            ).pack()
             ctk.CTkCheckBox(
-                days_frame, text=short, variable=var,
-                width=52, checkbox_width=18, checkbox_height=18,
-                font=ctk.CTkFont(size=12),
-            ).grid(row=0, column=i, padx=2)
+                cell, text="", variable=var,
+                width=30, checkbox_width=24, checkbox_height=24,
+                corner_radius=3,
+                fg_color="#434343", border_color="#434343",
+                checkmark_color="#ffffff",
+            ).pack(anchor="center", pady=(2, 0))
 
-        # ── Dress code ────────────────────────────────────────────────────────
+        # Dress code
         ctk.CTkLabel(
-            content, text="Dress code at work / school",
-            font=ctk.CTkFont(size=14, weight="bold"), anchor="w",
-        ).pack(fill="x", pady=(20, 8))
+            content, text="School / Work Dress Requirements",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color=_TEXT, anchor="w",
+        ).pack(fill="x", pady=(0, 8))
 
         dress_codes = ["Casual", "Business Casual", "Business Formal"]
         saved_code = get_dress_code() or dress_codes[0]
@@ -401,48 +553,62 @@ class PackingAgentApp(ctk.CTk):
 
         ctk.CTkOptionMenu(
             content, values=dress_codes, variable=dress_var,
-            width=220, font=ctk.CTkFont(size=13),
-        ).pack(anchor="w")
-
-        # ── Buttons ───────────────────────────────────────────────────────────
-        btn_row = ctk.CTkFrame(content, fg_color="transparent")
-        btn_row.pack(pady=(24, 0))
+            width=300, height=38, font=ctk.CTkFont(size=14),
+            fg_color=_BTN_CLR, button_color="#bebdbd",
+            button_hover_color=_BTN_HOVER, text_color=_TEXT,
+            corner_radius=8,
+        ).pack(anchor="w", pady=(0, 18))
 
         def _save():
             loc = loc_entry.get().strip()
             if loc:
-                status.configure(text="Checking location…")
+                status_lbl.configure(text="Checking location…")
                 dialog.update()
                 try:
                     from agent.weather import geocode
                     geocode(loc)
                     set_default_location(loc)
                 except Exception:
-                    status.configure(
+                    status_lbl.configure(
                         text="Location not found. Try a city name like 'Vancouver' or 'Tokyo'."
                     )
                     return
             else:
                 clear_default_location()
-
             set_work_days([full for full, var in day_vars.items() if var.get()])
             set_dress_code(dress_var.get())
             dialog.destroy()
 
-        ctk.CTkButton(btn_row, text="Save", width=110, command=_save).grid(row=0, column=0, padx=8)
         ctk.CTkButton(
-            btn_row, text="Cancel", width=110,
-            fg_color=("gray60", "gray35"), hover_color=("gray50", "gray25"),
-            command=dialog.destroy,
-        ).grid(row=0, column=1, padx=8)
+            content, text="Save",
+            height=50, corner_radius=25,
+            fg_color=_BTN_CLR, hover_color=_BTN_HOVER,
+            text_color=_TEXT, font=ctk.CTkFont(size=14),
+            command=_save,
+        ).pack(fill="x", pady=(0, 8))
 
-    # ── Input routing ─────────────────────────────────────────────────────────
+        ctk.CTkButton(
+            content, text="Back",
+            height=50, corner_radius=25,
+            fg_color=_BTN_CLR, hover_color=_BTN_HOVER,
+            text_color=_TEXT, font=ctk.CTkFont(size=14),
+            command=dialog.destroy,
+        ).pack(fill="x")
+
+    # ── Input routing ──────────────────────────────────────────────────────────
+
+    def _on_enter_key(self, event):
+        if not (event.state & 0x1):
+            self._on_send()
+            return "break"
 
     def _on_send(self):
-        text = self._entry.get().strip()
-        if not text or str(self._btn.cget("state")) == "disabled":
+        if self._is_busy:
             return
-        self._entry.delete(0, "end")
+        text = self._get_input()
+        if not text:
+            return
+        self._clear_input()
         self._user_say(text)
         try:
             self._route(text)
@@ -457,6 +623,7 @@ class PackingAgentApp(ctk.CTk):
             low = text.lower()
             if any(w in low for w in ("outfit", "wear", "what to wear")):
                 self._mode = "outfit"
+                self._set_title("Outfit")
                 default = get_default_location()
                 self._state = "AWAITING_OUTFIT_DATE"
                 if default:
@@ -472,6 +639,7 @@ class PackingAgentApp(ctk.CTk):
                     )
             elif any(w in low for w in ("pack", "trip", "travel", "traveling", "travelling")):
                 self._mode = "packing"
+                self._set_title("Packing")
                 self._state = "AWAITING_DESTINATION"
                 self._agent_say("Where are you traveling to?")
             else:
@@ -507,7 +675,6 @@ class PackingAgentApp(ctk.CTk):
             self._agent_say("What are your travel dates? (e.g. August 1, 2026 or August 1-15, 2026)")
 
         elif self._state == "AWAITING_START_DATE":
-            # Try range first so "August 1-15, 2026" skips the return-date prompt
             try:
                 start, end = _parse_date_range(text)
                 self._start_date = start
@@ -522,7 +689,9 @@ class PackingAgentApp(ctk.CTk):
                 self._state = "AWAITING_END_DATE"
                 self._agent_say("And your return date?")
             except ValueError:
-                self._agent_say("I couldn't read that date. Try something like August 1, 2026 or August 1-15, 2026.")
+                self._agent_say(
+                    "I couldn't read that date. Try something like August 1, 2026 or August 1-15, 2026."
+                )
 
         elif self._state == "AWAITING_END_DATE":
             try:
@@ -540,7 +709,7 @@ class PackingAgentApp(ctk.CTk):
             self._busy(True)
             threading.Thread(target=self._call_claude, args=(text,), daemon=True).start()
 
-    # ── Background work ───────────────────────────────────────────────────────
+    # ── Background work ────────────────────────────────────────────────────────
 
     def _build_user_context(self) -> str:
         parts = []
