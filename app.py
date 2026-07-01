@@ -144,8 +144,11 @@ def _parse_outfit_date_range(raw: str):
 
 
 def _parse_outfit_date_and_location(raw: str):
+    from datetime import date as _date
     raw = raw.strip()
     low = raw.lower()
+
+    # Explicit separator: "date in/to location" (case-insensitive)
     for sep in (" in ", " to "):
         if sep in low:
             idx = low.rfind(sep)
@@ -158,8 +161,41 @@ def _parse_outfit_date_and_location(raw: str):
                     return start, end, loc_part
                 except ValueError:
                     pass
-    start, end = _parse_outfit_date_range(raw)
-    return start, end, None
+
+    # Implicit: "date location" with no separator — try splitting at each word boundary
+    words = raw.split()
+    if len(words) >= 2:
+        for split_at in range(len(words) - 1, 0, -1):
+            date_part = " ".join(words[:split_at])
+            loc_part = " ".join(words[split_at:])
+            if not loc_part[0].isdigit():
+                try:
+                    start, end = _parse_outfit_date_range(date_part)
+                    return start, end, loc_part
+                except ValueError:
+                    pass
+
+    # Plain date, no location
+    try:
+        start, end = _parse_outfit_date_range(raw)
+        return start, end, None
+    except ValueError:
+        pass
+
+    # Input isn't a recognisable date — treat as a location name and use today
+    _DATE_WORDS = {
+        "today", "tomorrow", "yesterday", "next", "this", "last",
+        "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+        "january", "february", "march", "april", "may", "june", "july",
+        "august", "september", "october", "november", "december",
+        "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
+        "week", "weekend", "weeks", "day", "days",
+    }
+    words_low = low.split()
+    if words_low and not any(w in _DATE_WORDS for w in words_low) and not words_low[0][0].isdigit():
+        return _date.today(), _date.today(), raw
+
+    raise ValueError(raw)
 
 
 class PackingAgentApp(ctk.CTk):
