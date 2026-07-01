@@ -178,10 +178,13 @@ class PackingAgentApp(ctk.CTk):
 
         self._build_ui()
 
-        self.after(150, lambda: self._agent_say(
-            "Hi! Would you like outfit recommendations for a specific day, "
-            "or help packing for a trip?"
-        ))
+        if get_default_location():
+            self.after(150, self._launch_daily_outfit)
+        else:
+            self.after(150, lambda: self._agent_say(
+                "Hi! Would you like outfit recommendations for a specific day, "
+                "or help packing for a trip?"
+            ))
 
     # ── Layout ────────────────────────────────────────────────────────────────
 
@@ -280,6 +283,45 @@ class PackingAgentApp(ctk.CTk):
             self._btn.configure(text="Send", state="normal")
             self._entry.configure(state="normal")
             self._entry.focus()
+
+    # ── Daily outfit on launch ────────────────────────────────────────────────
+
+    def _launch_daily_outfit(self):
+        from datetime import date, timedelta
+        tomorrow = date.today() + timedelta(days=1)
+        self._mode = "outfit"
+        self._destination = get_default_location()
+        self._start_date = tomorrow
+        self._end_date = tomorrow
+        self._agent_say(f"Good morning! Let me grab tomorrow's outfit for {self._destination}…")
+        self._busy(True, "Fetching weather…")
+        threading.Thread(target=self._do_daily_outfit, daemon=True).start()
+
+    def _do_daily_outfit(self):
+        from datetime import date, timedelta
+        tomorrow = date.today() + timedelta(days=1)
+        day_name = tomorrow.strftime("%A")
+        work_days = get_work_days()
+        dress_code = get_dress_code()
+        is_work_day = day_name in work_days
+
+        if is_work_day:
+            user_context = f"Tomorrow is {day_name} — a work/school day."
+            if dress_code:
+                user_context += f" Dress code: {dress_code}."
+        else:
+            user_context = f"Tomorrow is {day_name} — a day off, no work or school."
+
+        try:
+            w = get_weather(self._destination, tomorrow.isoformat(), tomorrow.isoformat())
+            ctx = format_weather_context(w)
+            if w.get("is_historical"):
+                user_context += " (Weather is based on historical data — live forecast unavailable this far out.)"
+            reply, msgs = packer.get_outfit_email_recommendation(ctx, user_context)
+            self._messages = msgs
+            self.after(0, lambda r=reply: self._reply(r))
+        except Exception as exc:
+            self.after(0, lambda e=exc: self._error(f"Could not load daily outfit: {e}"))
 
     # ── Settings dialog ───────────────────────────────────────────────────────
 
