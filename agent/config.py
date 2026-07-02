@@ -51,3 +51,13 @@ def set_dress_code(code: str):
     config = _load()
     config['dress_code'] = code
     _save(config)
+
+
+def get_gender() -> str | None:
+    return _load().get('gender')
+
+
+def set_gender(gender: str):
+    config = _load()
+    config['gender'] = gender
+    _save(config)

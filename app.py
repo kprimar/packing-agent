@@ -19,6 +19,7 @@ from agent import packer
 from agent.config import (
     get_default_location, set_default_location, clear_default_location,
     get_work_days, set_work_days, get_dress_code, set_dress_code,
+    get_gender, set_gender,
 )
 
 ctk.set_appearance_mode("light")
@@ -357,6 +358,7 @@ class PackingAgentApp(ctk.CTk):
         self._entry.bind("<FocusIn>", self._ph_focus_in)
         self._entry.bind("<FocusOut>", self._ph_focus_out)
         self._entry.bind("<Return>", self._on_enter_key)
+        self._entry.bind("<Key>", self._ph_key)
 
         self._btn = ctk.CTkButton(
             self._input_frm, text="Send",
@@ -393,6 +395,14 @@ class PackingAgentApp(ctk.CTk):
             self._entry.insert("1.0", _PH_TEXT)
             self._entry.configure(text_color=_PH_COLOR)
             self._ph_active = True
+
+    def _ph_key(self, event):
+        # Clear placeholder when the user starts typing without a FocusIn event
+        # (happens when Enter is used to submit — textbox keeps focus, _ph_active stays True)
+        if self._ph_active and event.char and event.char.isprintable():
+            self._entry.delete("1.0", "end")
+            self._entry.configure(text_color=_TEXT)
+            self._ph_active = False
 
     def _get_input(self) -> str:
         if self._ph_active:
@@ -530,7 +540,7 @@ class PackingAgentApp(ctk.CTk):
     def _open_settings(self):
         dialog = ctk.CTkToplevel(self)
         dialog.title("Settings")
-        dialog.geometry("440x530")
+        dialog.geometry("440x640")
         dialog.resizable(False, False)
         dialog.configure(fg_color=_BG)
         dialog.grab_set()
@@ -636,6 +646,25 @@ class PackingAgentApp(ctk.CTk):
             corner_radius=8,
         ).pack(anchor="w", pady=(0, 18))
 
+        # Gender
+        ctk.CTkLabel(
+            content, text="Gender",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color=_TEXT, anchor="w",
+        ).pack(fill="x", pady=(0, 8))
+
+        genders = ["Not specified", "Male", "Female", "Non-binary"]
+        saved_gender = get_gender() or genders[0]
+        gender_var = ctk.StringVar(value=saved_gender)
+
+        ctk.CTkOptionMenu(
+            content, values=genders, variable=gender_var,
+            width=300, height=38, font=ctk.CTkFont(size=14),
+            fg_color=_BTN_CLR, button_color="#bebdbd",
+            button_hover_color=_BTN_HOVER, text_color=_TEXT,
+            corner_radius=8,
+        ).pack(anchor="w", pady=(0, 18))
+
         def _save():
             loc = loc_entry.get().strip()
             if loc:
@@ -654,6 +683,7 @@ class PackingAgentApp(ctk.CTk):
                 clear_default_location()
             set_work_days([full for full, var in day_vars.items() if var.get()])
             set_dress_code(dress_var.get())
+            set_gender(gender_var.get())
             dialog.destroy()
 
         ctk.CTkButton(
@@ -806,10 +836,13 @@ class PackingAgentApp(ctk.CTk):
         parts = []
         work_days = get_work_days()
         dress_code = get_dress_code()
+        gender = get_gender()
         if work_days:
             parts.append(f"Work/school days: {', '.join(work_days)}")
         if dress_code:
             parts.append(f"Dress code on work/school days: {dress_code}")
+        if gender and gender != "Not specified":
+            parts.append(f"Gender: {gender}")
         if self._mode == "outfit" and self._outfit_occasion:
             parts.append(f"Occasion: {self._outfit_occasion}")
         return "\n".join(parts)
