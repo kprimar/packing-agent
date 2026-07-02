@@ -198,6 +198,41 @@ def _parse_outfit_date_and_location(raw: str):
     raise ValueError(raw)
 
 
+def _parse_outfit_details(raw: str):
+    """Parse date, location, and occasion from a single user input.
+
+    Supports inputs like:
+      "tomorrow"
+      "tomorrow in Tokyo"
+      "tomorrow for a work dinner"
+      "tomorrow in Tokyo for a business meeting"
+      "tokyo"  (location only → date defaults to today)
+    Returns (start_date, end_date, location_or_None, occasion_or_None).
+    """
+    raw = raw.strip()
+    low = raw.lower()
+
+    # Split occasion off the end at the last " for "
+    occasion = None
+    date_loc_str = raw
+    for_idx = low.rfind(" for ")
+    if for_idx != -1:
+        candidate_occasion = raw[for_idx + 5:].strip()
+        candidate_date_loc = raw[:for_idx].strip()
+        if candidate_occasion and candidate_date_loc:
+            occasion = candidate_occasion
+            date_loc_str = candidate_date_loc
+
+    if date_loc_str:
+        start, end, location = _parse_outfit_date_and_location(date_loc_str)
+    else:
+        from datetime import date
+        start = end = date.today()
+        location = None
+
+    return start, end, location, occasion
+
+
 class PackingAgentApp(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -211,6 +246,7 @@ class PackingAgentApp(ctk.CTk):
         self._destination = None
         self._start_date = None
         self._end_date = None
+        self._outfit_occasion = None
         self._messages = []
         self._ph_active = True
         self._is_busy = False
@@ -441,6 +477,7 @@ class PackingAgentApp(ctk.CTk):
         self._destination = None
         self._start_date = None
         self._end_date = None
+        self._outfit_occasion = None
         self._messages = []
         self._is_busy = False
         self._set_title("Hi there!")
@@ -669,13 +706,15 @@ class PackingAgentApp(ctk.CTk):
                 if default:
                     self._destination = default
                     self._agent_say(
-                        f"Okay, for what day? I'll assume we're talking about {default}, "
-                        "unless you specify otherwise."
+                        f"What day and occasion? "
+                        f"I'll assume {default} unless you say otherwise. "
+                        "(e.g. 'tomorrow for a work dinner' or 'Friday in Tokyo for a wedding')"
                     )
                 else:
                     self._agent_say(
-                        "Okay, for what day? You can also include a location "
-                        "(e.g. 'tomorrow in Paris'). Or set a default in Settings (⚙)."
+                        "What day, location, and occasion? "
+                        "(e.g. 'tomorrow in Paris for a business meeting') "
+                        "Or set a default location in Settings (⚙)."
                     )
             elif any(w in low for w in ("pack", "trip", "travel", "traveling", "travelling")):
                 self._mode = "packing"
@@ -690,24 +729,36 @@ class PackingAgentApp(ctk.CTk):
 
         elif self._state == "AWAITING_OUTFIT_DATE":
             try:
-                start, end, loc_override = _parse_outfit_date_and_location(text)
+                start, end, loc_override, occasion = _parse_outfit_details(text)
                 self._start_date = start
                 self._end_date = end
                 if loc_override:
                     self._destination = loc_override
+                self._outfit_occasion = occasion
                 if not self._destination:
                     self._agent_say(
                         "I don't have a default location set. Try something like "
-                        "'tomorrow in Paris', or set a default in Settings (⚙)."
+                        "'tomorrow in Paris for a dinner', or set a default in Settings (⚙)."
+                    )
+                    return
+                if occasion is None:
+                    self._state = "AWAITING_OUTFIT_OCCASION"
+                    self._agent_say(
+                        "What's the occasion? (e.g. work, a dinner out, casual errands, hiking…)"
                     )
                     return
                 self._state = "FETCHING"
-                self._fetch_weather()
+                self._proceed_to_fetch()
             except ValueError:
                 self._agent_say(
-                    "I couldn't read that. Try 'today', 'tomorrow', 'this week', "
-                    "or a date like June 10."
+                    "I couldn't read that. Try 'tomorrow for a work dinner', "
+                    "'today in Tokyo for a meeting', or a date like 'June 10 for a wedding'."
                 )
+
+        elif self._state == "AWAITING_OUTFIT_OCCASION":
+            self._outfit_occasion = text.strip()
+            self._state = "FETCHING"
+            self._proceed_to_fetch()
 
         elif self._state == "AWAITING_DESTINATION":
             self._destination = text
@@ -759,7 +810,36 @@ class PackingAgentApp(ctk.CTk):
             parts.append(f"Work/school days: {', '.join(work_days)}")
         if dress_code:
             parts.append(f"Dress code on work/school days: {dress_code}")
+        if self._mode == "outfit" and self._outfit_occasion:
+            parts.append(f"Occasion: {self._outfit_occasion}")
         return "\n".join(parts)
+
+    def _proceed_to_fetch(self):
+        """Show extracted params in chat, then start weather fetch.
+
+        Surfaces the parsed {date, location, occasion} so any extraction bug
+        is visible before the weather or Claude steps run.
+        """
+        start, end = self._start_date, self._end_date
+        def _fmt(d, include_year=False):
+            s = d.strftime("%b %#d")   # %#d = no-padding day on Windows
+            if include_year:
+                s += f", {d.year}"
+            return s
+
+        if start == end:
+            date_str = f"{start.strftime('%A')} {_fmt(start)}"
+        else:
+            date_str = (
+                f"{_fmt(start)} – {_fmt(end)}"
+                if start.month == end.month
+                else f"{_fmt(start)} – {_fmt(end, include_year=True)}"
+            )
+        parts = [f"Date: {date_str}", f"Location: {self._destination}"]
+        if self._outfit_occasion:
+            parts.append(f"Occasion: {self._outfit_occasion}")
+        self._agent_say("\n".join(parts))
+        self._fetch_weather()
 
     def _fetch_weather(self):
         self._busy(True, "Fetching weather…")
